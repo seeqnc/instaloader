@@ -771,6 +771,8 @@ class Instaloader:
                 with self.context.error_catcher("Video thumbnail of {}".format(post)):
                     downloaded = (not _already_downloaded(filename + ".jpg") and
                                   self.download_pic(filename=filename, url=post.url, mtime=post.date_local))
+        elif post.typename == 'GraphStoryVideo':
+            pass
         else:
             self.context.error("Warning: {0} has unknown typename: {1}".format(post, post.typename))
 
