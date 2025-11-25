@@ -84,7 +84,7 @@ def _requires_login(func: Callable) -> Callable:
 
 
 def _retry_on_connection_error(func: Callable) -> Callable:
-    """Decorator to retry the function max_connection_attemps number of times.
+    """Decorator to retry the function max_connection_attempts number of times.
 
     Herewith-decorated functions need an ``_attempt`` keyword argument.
 
@@ -744,19 +744,20 @@ class Instaloader:
                         suffix: Optional[str] = str(edge_number)
                         if '{filename}' in self.filename_pattern:
                             suffix = None
-                        if self.download_pictures and (not sidecar_node.is_video or self.download_video_thumbnails):
+                        video_url = sidecar_node.video_url
+                        if self.download_pictures and (video_url is None or self.download_video_thumbnails):
                             # pylint:disable=cell-var-from-loop
                             sidecar_filename = self.__prepare_filename(filename_template,
                                                                        lambda: sidecar_node.display_url)
                             # Download sidecar picture or video thumbnail (--no-pictures implies --no-video-thumbnails)
                             downloaded &= self.download_pic(filename=sidecar_filename, url=sidecar_node.display_url,
                                                             mtime=post.date_local, filename_suffix=suffix)
-                        if sidecar_node.is_video and self.download_videos:
+                        if video_url is not None and self.download_videos:
                             # pylint:disable=cell-var-from-loop
                             sidecar_filename = self.__prepare_filename(filename_template,
-                                                                       lambda: sidecar_node.video_url)
+                                                                       lambda: video_url)
                             # Download sidecar video if desired
-                            downloaded &= self.download_pic(filename=sidecar_filename, url=sidecar_node.video_url,
+                            downloaded &= self.download_pic(filename=sidecar_filename, url=video_url,
                                                             mtime=post.date_local, filename_suffix=suffix)
                 else:
                     downloaded = False
@@ -1224,6 +1225,7 @@ class Instaloader:
            Use :meth:`Hashtag.get_posts_resumable`."""
         return Hashtag.from_name(self.context, hashtag).get_posts_resumable()
 
+    @_requires_login
     def download_hashtag(self, hashtag: Union[Hashtag, str],
                          max_count: Optional[int] = None,
                          post_filter: Optional[Callable[[Post], bool]] = None,
@@ -1311,6 +1313,7 @@ class Instaloader:
             post_filter,
             owner_profile=profile,
             takewhile=posts_takewhile,
+            possibly_pinned=3,
         )
         if latest_stamps is not None and reels.first_item is not None:
             latest_stamps.set_last_reels_timestamp(profile.username, reels.first_item.date_local)

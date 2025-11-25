@@ -20,7 +20,7 @@ class PostSidecarNode(NamedTuple):
     """Item of a Sidecar Post."""
     is_video: bool
     display_url: str
-    video_url: str
+    video_url: Optional[str]
 
 
 PostSidecarNode.is_video.__doc__ = "Whether this node is a video."
@@ -180,7 +180,7 @@ class Post:
     This class unifies access to the properties associated with a post. It implements == and is
     hashable.
 
-    :param context: :attr:`Instaloader.context` used for additional queries if neccessary..
+    :param context: :attr:`Instaloader.context` used for additional queries if necessary..
     :param node: Node structure, as returned by Instagram.
     :param owner_profile: The Profile of the owner, if already known at creation.
     """
@@ -512,14 +512,14 @@ class Post:
 
     @property
     def caption_hashtags(self) -> List[str]:
-        """List of all lowercased hashtags (without preceeding #) that occur in the Post's caption."""
+        """List of all lowercased hashtags (without preceding #) that occur in the Post's caption."""
         if not self.caption:
             return []
         return _hashtag_regex.findall(self.caption.lower())
 
     @property
     def caption_mentions(self) -> List[str]:
-        """List of all lowercased profiles that are mentioned in the Post's caption, without preceeding @."""
+        """List of all lowercased profiles that are mentioned in the Post's caption, without preceding @."""
         if not self.caption:
             return []
         return _mention_regex.findall(self.caption.lower())
@@ -600,6 +600,15 @@ class Post:
         .. versionadded:: 4.2.6"""
         if self.is_video:
             return self._field('video_view_count')
+        return None
+
+    @property
+    def video_play_count(self) -> Optional[int]:
+        """Play count of the video, or None.
+
+        .. versionadded:: 4.14.3"""
+        if self.is_video:
+            return self._field('video_play_count')
         return None
 
     @property
@@ -1079,7 +1088,7 @@ class Profile:
     @property
     def biography_hashtags(self) -> List[str]:
         """
-        List of all lowercased hashtags (without preceeding #) that occur in the Profile's biography.
+        List of all lowercased hashtags (without preceding #) that occur in the Profile's biography.
 
         .. versionadded:: 4.10
         """
@@ -1090,7 +1099,7 @@ class Profile:
     @property
     def biography_mentions(self) -> List[str]:
         """
-        List of all lowercased profiles that are mentioned in the Profile's biography, without preceeding @.
+        List of all lowercased profiles that are mentioned in the Profile's biography, without preceding @.
 
         .. versionadded:: 4.10
         """
@@ -1197,18 +1206,33 @@ class Profile:
 
         :rtype: NodeIterator[Post]"""
         self._obtain_metadata()
+        logged_in = self._context.is_logged_in
         return NodeIterator(
-            context = self._context,
-            edge_extractor = lambda d: d['data']['xdt_api__v1__feed__user_timeline_graphql_connection'],
-            node_wrapper = lambda n: Post.from_iphone_struct(self._context, n),
-            query_variables = {'data': {
-                'count': 12, 'include_relationship_info': True,
-                'latest_besties_reel_media': True, 'latest_reel_media': True},
-             'username': self.username},
-            query_referer = 'https://www.instagram.com/{0}/'.format(self.username),
-            is_first = Profile._make_is_newest_checker(),
-            doc_id = '7898261790222653',
-            query_hash = None,
+            context=self._context,
+            edge_extractor=(
+                (lambda d: d["data"]["xdt_api__v1__feed__user_timeline_graphql_connection"])
+                if logged_in
+                else (lambda d: d["data"]["user"]["edge_owner_to_timeline_media"])
+            ),
+            node_wrapper=(
+                (lambda n: Post.from_iphone_struct(self._context, n))
+                if logged_in
+                else (lambda n: Post(self._context, n, self))
+            ),
+            query_variables={
+                "data": {
+                    "count": 12,
+                    "include_relationship_info": True,
+                    "latest_besties_reel_media": True,
+                    "latest_reel_media": True,
+                },
+                **({"username": self.username} if logged_in else {"id": self.userid}),
+            },
+            query_referer="https://www.instagram.com/{0}/".format(self.username),
+            is_first=Profile._make_is_newest_checker(),
+            doc_id="7898261790222653" if logged_in else "7950326061742207",
+            query_hash=None,
+            first_data=(None if logged_in else self._metadata("edge_owner_to_timeline_media")),
         )
 
     def get_saved_posts(self) -> NodeIterator[Post]:
@@ -1534,7 +1558,7 @@ class StoryItem:
     @property
     def caption_hashtags(self) -> List[str]:
         """
-        List of all lowercased hashtags (without preceeding #) that occur in the StoryItem's caption.
+        List of all lowercased hashtags (without preceding #) that occur in the StoryItem's caption.
 
         .. versionadded:: 4.10
         """
@@ -1545,7 +1569,7 @@ class StoryItem:
     @property
     def caption_mentions(self) -> List[str]:
         """
-        List of all lowercased profiles that are mentioned in the StoryItem's caption, without preceeding @.
+        List of all lowercased profiles that are mentioned in the StoryItem's caption, without preceding @.
 
         .. versionadded:: 4.10
         """
@@ -1844,11 +1868,11 @@ class Hashtag:
     @classmethod
     def from_name(cls, context: InstaloaderContext, name: str):
         """
-        Create a Hashtag instance from a given hashtag name, without preceeding '#'. Raises an Exception if there is no
+        Create a Hashtag instance from a given hashtag name, without preceding '#'. Raises an Exception if there is no
         hashtag with the given name.
 
         :param context: :attr:`Instaloader.context`
-        :param name: Hashtag, without preceeding '#'
+        :param name: Hashtag, without preceding '#'
         :raises: :class:`QueryReturnedNotFoundException`
         """
         # pylint:disable=protected-access
@@ -1858,11 +1882,13 @@ class Hashtag:
 
     @property
     def name(self):
-        """Hashtag name lowercased, without preceeding '#'"""
+        """Hashtag name lowercased, without preceding '#'"""
         return self._node["name"].lower()
 
     def _query(self, params):
-        json_response = self._context.get_json("explore/tags/{0}/".format(self.name), params)
+        json_response = self._context.get_iphone_json(
+            "api/v1/tags/web_info/", {**params, "tag_name": self.name}
+        )
         return json_response["graphql"]["hashtag"] if "graphql" in json_response else json_response["data"]
 
     def _obtain_metadata(self):
@@ -2185,7 +2211,7 @@ def load_structure(context: InstaloaderContext, json_structure: dict) -> JsonExp
     """Loads a :class:`Post`, :class:`Profile`, :class:`StoryItem`, :class:`Hashtag` or :class:`FrozenNodeIterator` from
     a json structure.
 
-    :param context: :attr:`Instaloader.context` linked to the new object, used for additional queries if neccessary.
+    :param context: :attr:`Instaloader.context` linked to the new object, used for additional queries if necessary.
     :param json_structure: Instaloader JSON structure
 
     .. versionadded:: 4.8
@@ -2215,7 +2241,7 @@ def load_structure_from_file(context: InstaloaderContext, filename: str) -> Json
     """Loads a :class:`Post`, :class:`Profile`, :class:`StoryItem`, :class:`Hashtag` or :class:`FrozenNodeIterator` from
     a '.json' or '.json.xz' file that has been saved by :func:`save_structure_to_file`.
 
-    :param context: :attr:`Instaloader.context` linked to the new object, used for additional queries if neccessary.
+    :param context: :attr:`Instaloader.context` linked to the new object, used for additional queries if necessary.
     :param filename: Filename, ends in '.json' or '.json.xz'
     """
     compressed = filename.endswith('.xz')
