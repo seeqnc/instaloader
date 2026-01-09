@@ -799,7 +799,6 @@ class Instaloader:
         if self.save_metadata:
             self.save_metadata_json(filename, post)
 
-        self.context.log()
         return downloaded
 
     @_requires_login

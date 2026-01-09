@@ -150,8 +150,8 @@ class InstaloaderContext:
         if not self.quiet:
             if self.logger:
                 self.logger.info(*msg)
-
-            print(*msg, sep=sep, end=end, flush=flush)
+            else:
+                print(*msg, sep=sep, end=end, flush=flush)
 
     def error(self, msg, repeat_at_end=True):
         """Log a non-fatal error message to stderr, which is repeated at program termination.
